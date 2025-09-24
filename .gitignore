@@ -1,0 +1,70 @@
+# ==========================
+# Python
+# ==========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ==========================
+# Virtual Environment
+# ==========================
+env/
+venv/
+ENV/
+.venv/
+.env/
+
+# ==========================
+# IDE / Editor
+# ==========================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ==========================
+# OS files
+# ==========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================
+# Logs
+# ==========================
+*.log
+logs/
+*.out
+
+# ==========================
+# Data files (sensitive)
+# ==========================
+*.json
+*.jsonl
+*.csv
+*.db
+*.sqlite
+data/
+dataset/
+*.h5
+*.pkl
+*.npz
+
+# ==========================
+# Secrets / Environment
+# ==========================
+.env
+.env.*
+secrets/
+*.key
+*.pem
+credentials/
+config_local.py
