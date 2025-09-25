@@ -8,5 +8,10 @@ statsmodels>=0.14
 streamlit>=1.20
 tqdm>=4.65
 sqlalchemy>=1.4
-# Optional (uncomment if you want Prophet)
+selenium>=4.10
+webdriver-manager>=4.0
+# Optional (uncomment if you want Prophet for forecasting)
 # prophet>=1.1
+huggingface_hub>=0.24
+pyarrow>=14.0   # cần cho Parquet
+python-dotenv>=1.0
