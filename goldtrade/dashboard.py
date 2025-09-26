@@ -1,3 +1,4 @@
+# goldtrade/dashboard.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,7 +8,7 @@ import os
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import time
 from typing import Dict, Any
@@ -285,12 +286,6 @@ refresh_interval = st.sidebar.selectbox(
     format_func=lambda x: f"{x} " + t("seconds", "giây")
 )
 
-# Auto-refresh logic
-if auto_refresh:
-    placeholder = st.empty()
-    time.sleep(refresh_interval)
-    st.rerun()
-
 # Scraper controls
 st.sidebar.subheader(t("📡 Data Collection", "📡 Thu Thập Dữ Liệu"))
 col1, col2 = st.sidebar.columns(2)
@@ -316,8 +311,116 @@ with col2:
         st.rerun()
 
 # ---- Load Data ----
-current_df = load_current_data()
-historical_df = load_historical_data()
+def load_current_data_incremental(last_timestamp=datetime.min, db_file: str = DB_FILE) -> pd.DataFrame:
+    """Load incremental current data since last_timestamp"""
+    if not os.path.exists(db_file):
+        return pd.DataFrame()
+    
+    try:
+        conn = sqlite3.connect(db_file)
+        # Convert timestamp to string for SQL
+        last_timestamp_str = last_timestamp.isoformat() if isinstance(last_timestamp, datetime) else str(last_timestamp)
+        query = "SELECT * FROM gold_prices WHERE timestamp > ? ORDER BY timestamp DESC"
+        df = pd.read_sql(query, conn, params=(last_timestamp_str,), parse_dates=["timestamp"])
+        conn.close()
+        
+        if df.empty:
+            return df
+        
+        # Process data as in load_current_data
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        try:
+            df["raw_parsed"] = df["raw"].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        except Exception:
+            df["raw_parsed"] = None
+        
+        df["buy"] = pd.to_numeric(df["buy"], errors="coerce")
+        df["sell"] = pd.to_numeric(df["sell"], errors="coerce")
+        
+        df["spread"] = df.apply(lambda row: 
+            (row["sell"] - row["buy"]) if pd.notna(row["sell"]) and pd.notna(row["buy"]) else None, axis=1
+        )
+        
+        df["spread_pct"] = df.apply(lambda row: 
+            (row["spread"] / row["buy"] * 100) if pd.notna(row["spread"]) and pd.notna(row["buy"]) and row["buy"] != 0 else None, axis=1
+        )
+        
+        df["mid_price"] = df.apply(lambda row: 
+            ((row["buy"] + row["sell"]) / 2) if pd.notna(row["sell"]) and pd.notna(row["buy"]) else None, axis=1
+        )
+        
+        return df
+    except Exception as e:
+        st.error(t(f"Error loading incremental current data: {e}", f"Lỗi tải dữ liệu hiện tại tăng dần: {e}"))
+        return pd.DataFrame()
+
+def load_historical_data_incremental(last_date=date.min, db_file: str = TIMESERIES_DB) -> pd.DataFrame:
+    """Load incremental historical data since last_date"""
+    if not os.path.exists(db_file):
+        return pd.DataFrame()
+    
+    try:
+        conn = sqlite3.connect(db_file)
+        last_date_str = last_date.strftime('%Y-%m-%d') if isinstance(last_date, date) else str(last_date)
+        query = "SELECT * FROM gold_timeseries WHERE date > ? ORDER BY date DESC"
+        df = pd.read_sql(query, conn, params=(last_date_str,))
+        conn.close()
+        
+        if df.empty:
+            return df
+        
+        df["date"] = pd.to_datetime(df["date"])
+        
+        numeric_cols = ["buy", "sell", "open", "high", "low", "close", "spot_price"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        
+        df["spread"] = df.apply(lambda row: 
+            (row["sell"] - row["buy"]) if pd.notna(row["sell"]) and pd.notna(row["buy"]) else None, axis=1
+        )
+        
+        df["mid_price"] = df.apply(lambda row: 
+            ((row["buy"] + row["sell"]) / 2) if pd.notna(row["sell"]) and pd.notna(row["buy"]) else None, axis=1
+        )
+        
+        return df
+    except Exception as e:
+        st.error(t(f"Error loading incremental historical data: {e}", f"Lỗi tải dữ liệu lịch sử tăng dần: {e}"))
+        return pd.DataFrame()
+
+# Initialize session state for data
+if 'current_df' not in st.session_state:
+    st.session_state.current_df = load_current_data_incremental()
+    st.session_state.last_current_timestamp = st.session_state.current_df["timestamp"].max() if not st.session_state.current_df.empty else datetime.min
+
+if 'historical_df' not in st.session_state:
+    st.session_state.historical_df = load_historical_data_incremental()
+    st.session_state.last_historical_date = st.session_state.historical_df["date"].max().date() if not st.session_state.historical_df.empty else date.min
+
+# Function to update data incrementally
+def update_data():
+    # Update current data
+    new_current = load_current_data_incremental(st.session_state.last_current_timestamp)
+    if not new_current.empty:
+        st.session_state.current_df = pd.concat([st.session_state.current_df, new_current]).drop_duplicates(subset=["timestamp", "source"], keep="last").sort_values("timestamp", ascending=False)
+        st.session_state.last_current_timestamp = st.session_state.current_df["timestamp"].max()
+
+    # Update historical data
+    new_historical = load_historical_data_incremental(st.session_state.last_historical_date)
+    if not new_historical.empty:
+        st.session_state.historical_df = pd.concat([st.session_state.historical_df, new_historical]).drop_duplicates(subset=["date", "source"], keep="last").sort_values("date", ascending=False)
+        st.session_state.last_historical_date = st.session_state.historical_df["date"].max().date()
+
+# Auto-refresh logic with incremental update
+if auto_refresh:
+    update_data()
+    time.sleep(refresh_interval)
+    st.rerun()
+
+# Use st.session_state data
+current_df = st.session_state.current_df
+historical_df = st.session_state.historical_df
 
 if current_df.empty and historical_df.empty:
     st.warning(t("📭 No data found. Run the scraper first to collect gold price data.", "📭 Không tìm thấy dữ liệu. Chạy scraper trước để thu thập dữ liệu giá vàng."))
@@ -380,7 +483,7 @@ if not current_df.empty and selected_sources:
     st.subheader(t("💰 Current Market Overview", "💰 Tổng Quan Thị Trường Hiện Tại"))
     
     # Latest prices from each source
-    latest_data = current_df.groupby("source").last().reset_index()
+    latest_data = current_df.groupby("source").first().reset_index()
     latest_data = latest_data[latest_data["source"].isin(selected_sources)]
     
     # Create metrics columns
@@ -845,7 +948,7 @@ with portfolio_tabs[0]:  # Portfolio Tracker
             if not current_df.empty:
                 current_source_data = current_df[current_df["source"] == pos["source"]]
                 if not current_source_data.empty:
-                    current_price = current_source_data.iloc[-1]["sell"]
+                    current_price = current_source_data.iloc[0]["sell"]
             
             pnl = (current_price - pos["entry_price"]) * pos["quantity"]
             pnl_pct = (current_price - pos["entry_price"]) / pos["entry_price"] * 100 if pos["entry_price"] != 0 else 0
@@ -867,32 +970,32 @@ with portfolio_tabs[0]:  # Portfolio Tracker
                 t("Status", "Trạng Thái"): pos["status"]
             })
         
-            portfolio_df = pd.DataFrame(portfolio_data)
-            st.dataframe(portfolio_df, use_container_width=True)
+        portfolio_df = pd.DataFrame(portfolio_data)
+        st.dataframe(portfolio_df, use_container_width=True)
+        
+        # Portfolio performance chart
+        if len(portfolio_data) > 0:
+            fig_portfolio = go.Figure()
             
-            # Portfolio performance chart
-            if len(portfolio_data) > 0:
-                fig_portfolio = go.Figure()
-                
-                pnl_values = [float(p[t("P&L", "Lãi/Lỗ")].replace(" ₫", "").replace(",", "")) for p in portfolio_data]
-                sources = [p[t("Source", "Nguồn")] for p in portfolio_data]
-                
-                fig_portfolio.add_trace(go.Bar(
-                    x=sources,
-                    y=pnl_values,
-                    marker_color=["green" if x > 0 else "red" for x in pnl_values],
-                    text=[f"{x:,.0f} ₫" for x in pnl_values],
-                    textposition="auto"
-                ))
-                
-                fig_portfolio.update_layout(
-                    title=t("Portfolio P&L by Source", "Lãi/Lỗ Danh Mục Theo Nguồn"),
-                    xaxis_title=t("Source", "Nguồn"),
-                    yaxis_title=t("P&L (₫)", "Lãi/Lỗ (₫)"),
-                    height=400
-                )
-                
-                st.plotly_chart(fig_portfolio, use_container_width=True)
+            pnl_values = [float(p[t("P&L", "Lãi/Lỗ")].replace(" ₫", "").replace(",", "")) for p in portfolio_data]
+            sources = [p[t("Source", "Nguồn")] for p in portfolio_data]
+            
+            fig_portfolio.add_trace(go.Bar(
+                x=sources,
+                y=pnl_values,
+                marker_color=["green" if x > 0 else "red" for x in pnl_values],
+                text=[f"{x:,.0f} ₫" for x in pnl_values],
+                textposition="auto"
+            ))
+            
+            fig_portfolio.update_layout(
+                title=t("Portfolio P&L by Source", "Lãi/Lỗ Danh Mục Theo Nguồn"),
+                xaxis_title=t("Source", "Nguồn"),
+                yaxis_title=t("P&L (₫)", "Lãi/Lỗ (₫)"),
+                height=400
+            )
+            
+            st.plotly_chart(fig_portfolio, use_container_width=True)
 
 with portfolio_tabs[1]:  # Risk Analysis
     st.markdown(t("### ⚖️ Risk Analysis & VaR Calculator", "### ⚖️ Phân Tích Rủi Ro & Máy Tính VaR"))
@@ -963,13 +1066,13 @@ with portfolio_tabs[1]:  # Risk Analysis
                     
                     # Sharpe ratio
                     excess_return = source_data["returns"].mean() - risk_free_rate/252
-                    sharpe_ratio = excess_return / source_data["returns"].std() * np.sqrt(252)
+                    sharpe_ratio = excess_return / source_data["returns"].std() * np.sqrt(252) if source_data["returns"].std() != 0 else 0
                     sharpe_ratios[source] = sharpe_ratio
                     
                     # Maximum Drawdown
                     cumulative = (1 + source_data["returns"]).cumprod()
                     rolling_max = cumulative.expanding().max()
-                    drawdown = (cumulative - rolling_max) / rolling_max
+                    drawdown = (cumulative - rolling_max) / rolling_max if rolling_max.any() else pd.Series(0, index=cumulative.index)
                     max_drawdown = drawdown.min()
                     max_drawdowns[source] = max_drawdown
             
@@ -1041,7 +1144,7 @@ with portfolio_tabs[2]:  # Performance Reports
                     t("Min Price", "Giá Tối Thiểu"): source_data["sell"].min(),
                     t("Max Price", "Giá Tối Đa"): source_data["sell"].max(),
                     t("Avg Spread", "Chênh Lệch Trung Bình"): source_data["spread"].mean(),
-                    t("Spread %", "Chênh Lệch %"): (source_data["spread"] / source_data["sell"] * 100).mean(),
+                    t("Spread %", "Chênh Lệch %"): (source_data["spread"] / source_data["sell"] * 100).mean() if not source_data.empty else 0,
                     t("Data Points", "Điểm Dữ Liệu"): len(source_data)
                 }
                 comparison_data.append(metrics)
@@ -1068,11 +1171,20 @@ with portfolio_tabs[2]:  # Performance Reports
             
             for _, row in comp_df.iterrows():
                 # Normalize metrics for radar chart
+                avg_price_min = comp_df[t("Avg Price", "Giá Trung Bình")].min()
+                avg_price_max = comp_df[t("Avg Price", "Giá Trung Bình")].max()
+                price_std_min = comp_df[t("Price Std", "Độ Lệch Chuẩn Giá")].min()
+                price_std_max = comp_df[t("Price Std", "Độ Lệch Chuẩn Giá")].max()
+                spread_min = comp_df[t("Spread %", "Chênh Lệch %")].min()
+                spread_max = comp_df[t("Spread %", "Chênh Lệch %")].max()
+                data_points_min = comp_df[t("Data Points", "Điểm Dữ Liệu")].min()
+                data_points_max = comp_df[t("Data Points", "Điểm Dữ Liệu")].max()
+                
                 values = [
-                    (row[t("Avg Price", "Giá Trung Bình")] - comp_df[t("Avg Price", "Giá Trung Bình")].min()) / (comp_df[t("Avg Price", "Giá Trung Bình")].max() - comp_df[t("Avg Price", "Giá Trung Bình")].min()),
-                    (row[t("Price Std", "Độ Lệch Chuẩn Giá")] - comp_df[t("Price Std", "Độ Lệch Chuẩn Giá")].min()) / (comp_df[t("Price Std", "Độ Lệch Chuẩn Giá")].max() - comp_df[t("Price Std", "Độ Lệch Chuẩn Giá")].min()),
-                    (row[t("Spread %", "Chênh Lệch %")] - comp_df[t("Spread %", "Chênh Lệch %")].min()) / (comp_df[t("Spread %", "Chênh Lệch %")].max() - comp_df[t("Spread %", "Chênh Lệch %")].min()),
-                    (row[t("Data Points", "Điểm Dữ Liệu")] - comp_df[t("Data Points", "Điểm Dữ Liệu")].min()) / (comp_df[t("Data Points", "Điểm Dữ Liệu")].max() - comp_df[t("Data Points", "Điểm Dữ Liệu")].min())
+                    (row[t("Avg Price", "Giá Trung Bình")] - avg_price_min) / (avg_price_max - avg_price_min) if avg_price_max != avg_price_min else 0,
+                    (row[t("Price Std", "Độ Lệch Chuẩn Giá")] - price_std_min) / (price_std_max - price_std_min) if price_std_max != price_std_min else 0,
+                    (row[t("Spread %", "Chênh Lệch %")] - spread_min) / (spread_max - spread_min) if spread_max != spread_min else 0,
+                    (row[t("Data Points", "Điểm Dữ Liệu")] - data_points_min) / (data_points_max - data_points_min) if data_points_max != data_points_min else 0
                 ]
                 
                 fig_radar.add_trace(go.Scatterpolar(
@@ -1124,7 +1236,7 @@ with portfolio_tabs[3]:  # Position Calculator
         stop_loss_pct = st.slider(t("Stop Loss (%)", "Dừng Lỗ (%)"), 1.0, 10.0, 3.0) / 100
         
         risk_amount = account_size * risk_per_trade
-        position_size = risk_amount / stop_loss_pct
+        position_size = risk_amount / stop_loss_pct if stop_loss_pct != 0 else 0
         
         st.metric(t("Position Size", "Kích Thước Vị Thế"), f"{position_size:,.0f} ₫")
         st.metric(t("Risk Amount", "Số Lượng Rủi Ro"), f"{risk_amount:,.0f} ₫")
@@ -1514,7 +1626,7 @@ with ml_tabs[0]:  # Price Forecasting
                         with metric_col2:
                             st.metric("MAE", f"{mae:,.0f} ₫")
                         with metric_col3:
-                            pred_change = (predictions[-1] - y.iloc[-1]) / y.iloc[-1] * 100 if len(y) > 0 else 0
+                            pred_change = (predictions[-1] - y.iloc[-1]) / y.iloc[-1] * 100 if len(y) > 0 and y.iloc[-1] != 0 else 0
                             st.metric(t("Forecast Change", "Thay Đổi Dự Báo"), f"{pred_change:+.2f}%")
                         
                 except Exception as e:
@@ -1701,7 +1813,7 @@ with ml_tabs[2]:  # Anomaly Detection
             # Z-score based anomalies
             price_mean = anomaly_data["sell"].rolling(30).mean()
             price_std = anomaly_data["sell"].rolling(30).std()
-            z_scores = (anomaly_data["sell"] - price_mean) / price_std
+            z_scores = (anomaly_data["sell"] - price_mean) / price_std if not price_std.empty and (price_std != 0).all() else pd.Series(0, index=anomaly_data.index)
             
             # Anomaly threshold
             anomaly_threshold = st.slider(t("Anomaly Threshold (Z-score)", "Ngưỡng Bất Thường (Z-score)"), 1.5, 4.0, 2.5, 0.1)
