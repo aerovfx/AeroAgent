@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# coding: utf-8
-"""
-Enhanced dashboard.py - Advanced Streamlit dashboard for gold prices with real-time features
-Run:
-    streamlit run dashboard.py
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -87,25 +79,51 @@ def load_current_data(db_file: str = DB_FILE) -> pd.DataFrame:
     if not os.path.exists(db_file):
         return pd.DataFrame()
     
-    conn = sqlite3.connect(db_file)
-    df = pd.read_sql("SELECT * FROM gold_prices ORDER BY timestamp DESC", conn, parse_dates=["timestamp"])
-    conn.close()
-    
-    if df.empty:
+    try:
+        conn = sqlite3.connect(db_file)
+        df = pd.read_sql("SELECT * FROM gold_prices ORDER BY timestamp DESC", conn, parse_dates=["timestamp"])
+        conn.close()
+        
+        if df.empty:
+            return df
+        
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        try:
+            df["raw_parsed"] = df["raw"].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        except Exception:
+            df["raw_parsed"] = None
+        
+        # Calculate spreads and other metrics with error handling
+        df["buy"] = pd.to_numeric(df["buy"], errors="coerce")
+        df["sell"] = pd.to_numeric(df["sell"], errors="coerce")
+        
+        # Only calculate spreads where both buy and sell are valid
+        df["spread"] = df.apply(lambda row: 
+            (row["sell"] - row["buy"]) if (
+                pd.notna(row["sell"]) and pd.notna(row["buy"]) and 
+                row["sell"] is not None and row["buy"] is not None
+            ) else None, axis=1
+        )
+        
+        df["spread_pct"] = df.apply(lambda row: 
+            (row["spread"] / row["buy"] * 100) if (
+                pd.notna(row["spread"]) and pd.notna(row["buy"]) and 
+                row["spread"] is not None and row["buy"] is not None and row["buy"] != 0
+            ) else None, axis=1
+        )
+        
+        df["mid_price"] = df.apply(lambda row: 
+            ((row["buy"] + row["sell"]) / 2) if (
+                pd.notna(row["sell"]) and pd.notna(row["buy"]) and 
+                row["sell"] is not None and row["buy"] is not None
+            ) else None, axis=1
+        )
+        
         return df
     
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    try:
-        df["raw_parsed"] = df["raw"].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
-    except Exception:
-        df["raw_parsed"] = None
-    
-    # Calculate spreads and other metrics
-    df["spread"] = df["sell"] - df["buy"]
-    df["spread_pct"] = (df["spread"] / df["buy"]) * 100
-    df["mid_price"] = (df["buy"] + df["sell"]) / 2
-    
-    return df
+    except Exception as e:
+        st.error(f"Error loading current data: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_historical_data(db_file: str = TIMESERIES_DB) -> pd.DataFrame:
@@ -113,22 +131,44 @@ def load_historical_data(db_file: str = TIMESERIES_DB) -> pd.DataFrame:
     if not os.path.exists(db_file):
         return pd.DataFrame()
     
-    conn = sqlite3.connect(db_file)
-    df = pd.read_sql("""
-        SELECT date, source, buy, sell, open, high, low, close, spot_price, unit, timestamp
-        FROM gold_timeseries 
-        ORDER BY date DESC, source
-    """, conn)
-    conn.close()
-    
-    if df.empty:
+    try:
+        conn = sqlite3.connect(db_file)
+        df = pd.read_sql("""
+            SELECT date, source, buy, sell, open, high, low, close, spot_price, unit, timestamp
+            FROM gold_timeseries 
+            ORDER BY date DESC, source
+        """, conn)
+        conn.close()
+        
+        if df.empty:
+            return df
+        
+        df["date"] = pd.to_datetime(df["date"])
+        
+        # Convert numeric columns with error handling
+        numeric_cols = ["buy", "sell", "open", "high", "low", "close", "spot_price"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        
+        # Calculate spreads and mid_price with null checking
+        df["spread"] = df.apply(lambda row: 
+            (row["sell"] - row["buy"]) if (
+                pd.notna(row["sell"]) and pd.notna(row["buy"])
+            ) else None, axis=1
+        )
+        
+        df["mid_price"] = df.apply(lambda row: 
+            ((row["buy"] + row["sell"]) / 2) if (
+                pd.notna(row["sell"]) and pd.notna(row["buy"])
+            ) else None, axis=1
+        )
+        
         return df
     
-    df["date"] = pd.to_datetime(df["date"])
-    df["spread"] = df["sell"] - df["buy"]
-    df["mid_price"] = (df["buy"] + df["sell"]) / 2
-    
-    return df
+    except Exception as e:
+        st.error(f"Error loading historical data: {e}")
+        return pd.DataFrame()
 
 def calculate_technical_indicators(df: pd.DataFrame, price_col: str = "close") -> pd.DataFrame:
     """Calculate technical indicators"""
@@ -259,15 +299,19 @@ if current_df.empty and historical_df.empty:
     st.warning("📭 No data found. Run the scraper first to collect gold price data.")
     st.stop()
 
-# Data source selection
+# ---- Data source selection with validation ----
 all_sources = []
 if not current_df.empty:
-    all_sources.extend(current_df["source"].unique().tolist())
+    all_sources.extend([s for s in current_df["source"].unique().tolist() if pd.notna(s)])
 if not historical_df.empty:
-    all_sources.extend(historical_df["source"].unique().tolist())
+    all_sources.extend([s for s in historical_df["source"].unique().tolist() if pd.notna(s)])
 all_sources = sorted(list(set(all_sources)))
 
-selected_sources = st.sidebar.multiselect("📊 Select Sources", all_sources, default=all_sources[:5])
+if not all_sources:
+    st.warning("📭 No valid data sources found. Please run the scraper to collect data.")
+    st.stop()
+
+selected_sources = st.sidebar.multiselect("📊 Select Sources", all_sources, default=all_sources[:min(5, len(all_sources))])
 
 # Time range selection
 st.sidebar.subheader("📅 Time Range")
@@ -308,7 +352,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---- Current Market Overview ----
-if not current_df.empty:
+if not current_df.empty and selected_sources:
     st.subheader("💰 Current Market Overview")
     
     # Latest prices from each source
@@ -323,19 +367,37 @@ if not current_df.empty:
             with cols[i]:
                 # Calculate change (mock for now - would need historical comparison)
                 change = np.random.uniform(-2, 2)  # Replace with actual calculation
-                change_pct = change / row["sell"] * 100 if row["sell"] else 0
                 
-                st.metric(
-                    label=f"{row['source']} (Sell)",
-                    value=f"{row['sell']:,.0f} ₫",
-                    delta=f"{change_pct:+.2f}%"
-                )
+                # Check if sell price is valid before calculations
+                if pd.notna(row["sell"]) and row["sell"] is not None and row["sell"] != 0:
+                    change_pct = change / row["sell"] * 100
+                    
+                    st.metric(
+                        label=f"{row['source']} (Sell)",
+                        value=f"{row['sell']:,.0f} ₫",
+                        delta=f"{change_pct:+.2f}%"
+                    )
+                else:
+                    st.metric(
+                        label=f"{row['source']} (Sell)",
+                        value="N/A",
+                        delta="N/A"
+                    )
                 
-                st.metric(
-                    label="Spread",
-                    value=f"{row['spread']:,.0f} ₫",
-                    delta=f"{row['spread_pct']:.2f}%"
-                )
+                # Display spread info if available
+                if (pd.notna(row.get("spread")) and row.get("spread") is not None and
+                    pd.notna(row.get("spread_pct")) and row.get("spread_pct") is not None):
+                    st.metric(
+                        label="Spread",
+                        value=f"{row['spread']:,.0f} ₫",
+                        delta=f"{row['spread_pct']:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        label="Spread",
+                        value="N/A",
+                        delta="N/A"
+                    )
 
 # ---- Technical Analysis Dashboard ----
 if not historical_df.empty:
@@ -521,27 +583,40 @@ if not historical_df.empty:
                 latest = source_data.iloc[-1]
                 previous = source_data.iloc[-2]
                 
-                # Price change alert
-                price_change = (latest["sell"] - previous["sell"]) / previous["sell"] * 100
-                if abs(price_change) > 2:  # 2% change threshold
-                    alert_type = "🔴 HIGH" if abs(price_change) > 5 else "🟡 MEDIUM"
-                    alerts.append({
-                        "Type": alert_type,
-                        "Source": source,
-                        "Signal": f"Price change: {price_change:+.2f}%",
-                        "Current": f"{latest['sell']:,.0f} ₫",
-                        "Previous": f"{previous['sell']:,.0f} ₫"
-                    })
+                # Check if data is valid before calculations
+                if (latest["sell"] is not None and previous["sell"] is not None and 
+                    not pd.isna(latest["sell"]) and not pd.isna(previous["sell"]) and 
+                    previous["sell"] != 0):
+                    
+                    # Price change alert
+                    try:
+                        price_change = (latest["sell"] - previous["sell"]) / previous["sell"] * 100
+                        if abs(price_change) > 2:  # 2% change threshold
+                            alert_type = "🔴 HIGH" if abs(price_change) > 5 else "🟡 MEDIUM"
+                            alerts.append({
+                                "Type": alert_type,
+                                "Source": source,
+                                "Signal": f"Price change: {price_change:+.2f}%",
+                                "Current": f"{latest['sell']:,.0f} ₫",
+                                "Previous": f"{previous['sell']:,.0f} ₫"
+                            })
+                    except (TypeError, ZeroDivisionError, ValueError):
+                        # Skip this source if calculation fails
+                        continue
                 
-                # Spread alert
-                if latest["spread_pct"] > 3:  # High spread alert
-                    alerts.append({
-                        "Type": "🟡 MEDIUM",
-                        "Source": source,
-                        "Signal": f"High spread: {latest['spread_pct']:.2f}%",
-                        "Current": f"{latest['spread']:,.0f} ₫",
-                        "Previous": "-"
-                    })
+                # Spread alert - check if spread_pct exists and is valid
+                if ("spread_pct" in latest and latest["spread_pct"] is not None and 
+                    not pd.isna(latest["spread_pct"]) and latest["spread_pct"] > 3):
+                    try:
+                        alerts.append({
+                            "Type": "🟡 MEDIUM",
+                            "Source": source,
+                            "Signal": f"High spread: {latest['spread_pct']:.2f}%",
+                            "Current": f"{latest.get('spread', 0):,.0f} ₫",
+                            "Previous": "-"
+                        })
+                    except (TypeError, ValueError):
+                        continue
         
         if alerts:
             alerts_df = pd.DataFrame(alerts)
