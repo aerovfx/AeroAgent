@@ -821,19 +821,21 @@ with portfolio_tabs[0]:  # Portfolio Tracker
     
     with col2:
         # Portfolio summary
-        if "portfolio" in st.session_state and st.session_state.portfolio:
-            total_positions = len(st.session_state.portfolio)
-            total_value = sum(p["quantity"] * p["entry_price"] for p in st.session_state.portfolio)
-            
-            st.metric(t("Total Positions", "Tổng Vị Thế"), total_positions)
-            st.metric(t("Portfolio Value", "Giá Trị Danh Mục"), f"{total_value:,.0f} ₫")
-            
-            if st.button(t("🗑️ Clear Portfolio", "🗑️ Xóa Danh Mục")):
-                st.session_state.portfolio = []
-                st.rerun()
+        if "portfolio" not in st.session_state or not st.session_state.portfolio:
+            st.session_state.portfolio = []
+        
+        total_positions = len(st.session_state.portfolio)
+        total_value = sum(p["quantity"] * p["entry_price"] for p in st.session_state.portfolio) if st.session_state.portfolio else 0
+        
+        st.metric(t("Total Positions", "Tổng Vị Thế"), total_positions)
+        st.metric(t("Portfolio Value", "Giá Trị Danh Mục"), f"{total_value:,.0f} ₫")
+        
+        if st.button(t("🗑️ Clear Portfolio", "🗑️ Xóa Danh Mục")):
+            st.session_state.portfolio = []
+            st.rerun()
     
     # Portfolio display
-    if "portfolio" in st.session_state and st.session_state.portfolio:
+    if st.session_state.portfolio:
         st.markdown(t("#### Current Positions", "#### Vị Thế Hiện Tại"))
         
         portfolio_data = []
@@ -846,7 +848,7 @@ with portfolio_tabs[0]:  # Portfolio Tracker
                     current_price = current_source_data.iloc[-1]["sell"]
             
             pnl = (current_price - pos["entry_price"]) * pos["quantity"]
-            pnl_pct = (current_price - pos["entry_price"]) / pos["entry_price"] * 100
+            pnl_pct = (current_price - pos["entry_price"]) / pos["entry_price"] * 100 if pos["entry_price"] != 0 else 0
             
             if t("Short (Sell)", "Bán (Short)") in pos["type"]:
                 pnl = -pnl
@@ -865,32 +867,32 @@ with portfolio_tabs[0]:  # Portfolio Tracker
                 t("Status", "Trạng Thái"): pos["status"]
             })
         
-        portfolio_df = pd.DataFrame(portfolio_data)
-        st.dataframe(portfolio_df, use_container_width=True)
-        
-        # Portfolio performance chart
-        if len(portfolio_data) > 0:
-            fig_portfolio = go.Figure()
+            portfolio_df = pd.DataFrame(portfolio_data)
+            st.dataframe(portfolio_df, use_container_width=True)
             
-            pnl_values = [float(p[t("P&L", "Lãi/Lỗ")].replace(" ₫", "").replace(",", "")) for p in portfolio_data]
-            sources = [p[t("Source", "Nguồn")] for p in portfolio_data]
-            
-            fig_portfolio.add_trace(go.Bar(
-                x=sources,
-                y=pnl_values,
-                marker_color=["green" if x > 0 else "red" for x in pnl_values],
-                text=[f"{x:,.0f} ₫" for x in pnl_values],
-                textposition="auto"
-            ))
-            
-            fig_portfolio.update_layout(
-                title=t("Portfolio P&L by Source", "Lãi/Lỗ Danh Mục Theo Nguồn"),
-                xaxis_title=t("Source", "Nguồn"),
-                yaxis_title=t("P&L (₫)", "Lãi/Lỗ (₫)"),
-                height=400
-            )
-            
-            st.plotly_chart(fig_portfolio, use_container_width=True)
+            # Portfolio performance chart
+            if len(portfolio_data) > 0:
+                fig_portfolio = go.Figure()
+                
+                pnl_values = [float(p[t("P&L", "Lãi/Lỗ")].replace(" ₫", "").replace(",", "")) for p in portfolio_data]
+                sources = [p[t("Source", "Nguồn")] for p in portfolio_data]
+                
+                fig_portfolio.add_trace(go.Bar(
+                    x=sources,
+                    y=pnl_values,
+                    marker_color=["green" if x > 0 else "red" for x in pnl_values],
+                    text=[f"{x:,.0f} ₫" for x in pnl_values],
+                    textposition="auto"
+                ))
+                
+                fig_portfolio.update_layout(
+                    title=t("Portfolio P&L by Source", "Lãi/Lỗ Danh Mục Theo Nguồn"),
+                    xaxis_title=t("Source", "Nguồn"),
+                    yaxis_title=t("P&L (₫)", "Lãi/Lỗ (₫)"),
+                    height=400
+                )
+                
+                st.plotly_chart(fig_portfolio, use_container_width=True)
 
 with portfolio_tabs[1]:  # Risk Analysis
     st.markdown(t("### ⚖️ Risk Analysis & VaR Calculator", "### ⚖️ Phân Tích Rủi Ro & Máy Tính VaR"))
@@ -1147,7 +1149,7 @@ with portfolio_tabs[3]:  # Position Calculator
         total_fees = buy_fee + sell_fee
         
         net_pnl = gross_pnl - total_fees
-        roi = net_pnl / (entry_price * position_grams) * 100
+        roi = net_pnl / (entry_price * position_grams) * 100 if entry_price * position_grams != 0 else 0
         
         # Display results
         st.markdown(t("**Calculation Results:**", "**Kết Quả Tính Toán:**"))
@@ -1166,7 +1168,7 @@ with portfolio_tabs[3]:  # Position Calculator
                 st.error(t("❌ Loss-making trade", "❌ Giao Dịch Lỗ"))
         
         # Break-even analysis
-        breakeven_price = entry_price + (total_fees / position_grams)
+        breakeven_price = entry_price + (total_fees / position_grams) if position_grams != 0 else entry_price
         st.info(f"📊 {t('Break-even price', 'Giá Hòa Vốn')}: {breakeven_price:,.0f} ₫/gram")
 
 # ---- Market News & Sentiment ----
@@ -1512,7 +1514,7 @@ with ml_tabs[0]:  # Price Forecasting
                         with metric_col2:
                             st.metric("MAE", f"{mae:,.0f} ₫")
                         with metric_col3:
-                            pred_change = (predictions[-1] - y.iloc[-1]) / y.iloc[-1] * 100
+                            pred_change = (predictions[-1] - y.iloc[-1]) / y.iloc[-1] * 100 if len(y) > 0 else 0
                             st.metric(t("Forecast Change", "Thay Đổi Dự Báo"), f"{pred_change:+.2f}%")
                         
                 except Exception as e:
@@ -1774,7 +1776,7 @@ with ml_tabs[2]:  # Anomaly Detection
                 else:
                     st.metric(t("Days Since Last Anomaly", "Ngày Kể Từ Bất Thường Cuối"), "N/A")
             with col3:
-                anomaly_rate = len(anomalies) / len(anomaly_data) * 100
+                anomaly_rate = len(anomalies) / len(anomaly_data) * 100 if len(anomaly_data) > 0 else 0
                 st.metric(t("Anomaly Rate", "Tỷ Lệ Bất Thường"), f"{anomaly_rate:.2f}%")
             
             # Recent anomalies table
@@ -1902,28 +1904,28 @@ with ml_tabs[3]:  # Scenario Analysis
                     
                     with result_col1:
                         median_price = percentiles[2]
-                        median_change = (median_price - current_price) / current_price * 100
+                        median_change = (median_price - current_price) / current_price * 100 if current_price != 0 else 0
                         st.metric(t("Median Outcome", "Kết Quả Trung Vị"), f"{median_price:,.0f} ₫", f"{median_change:+.1f}%")
                     
                     with result_col2:
                         best_case = percentiles[4]
-                        best_change = (best_case - current_price) / current_price * 100
+                        best_change = (best_case - current_price) / current_price * 100 if current_price != 0 else 0
                         st.metric(t("95th Percentile", "Phần Trăm Thứ 95"), f"{best_case:,.0f} ₫", f"{best_change:+.1f}%")
                     
                     with result_col3:
                         worst_case = percentiles[0]
-                        worst_change = (worst_case - current_price) / current_price * 100
+                        worst_change = (worst_case - current_price) / current_price * 100 if current_price != 0 else 0
                         st.metric(t("5th Percentile", "Phần Trăm Thứ 5"), f"{worst_case:,.0f} ₫", f"{worst_change:+.1f}%")
                     
                     with result_col4:
                         var_95 = current_price - percentiles[0]
-                        st.metric(f"VaR (95%)", f"{var_95:,.0f} ₫", f"{var_95/current_price*100:.1f}%")
+                        st.metric(f"VaR (95%)", f"{var_95:,.0f} ₫", f"{var_95/current_price*100:.1f}%" if current_price != 0 else "0.0%")
                     
                     # Probability analysis
                     final_prices = simulations_array[:, -1]
-                    prob_gain = (final_prices > current_price).sum() / num_simulations * 100
-                    prob_loss_10 = (final_prices < current_price * 0.9).sum() / num_simulations * 100
-                    prob_gain_10 = (final_prices > current_price * 1.1).sum() / num_simulations * 100
+                    prob_gain = (final_prices > current_price).sum() / num_simulations * 100 if num_simulations > 0 else 0
+                    prob_loss_10 = (final_prices < current_price * 0.9).sum() / num_simulations * 100 if num_simulations > 0 else 0
+                    prob_gain_10 = (final_prices > current_price * 1.1).sum() / num_simulations * 100 if num_simulations > 0 else 0
                     
                     st.markdown(t("#### 🎯 Probability Analysis", "#### 🎯 Phân Tích Xác Suất"))
                     prob_col1, prob_col2, prob_col3 = st.columns(3)
