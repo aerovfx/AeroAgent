@@ -1,0 +1,1 @@
+cd /Users/pixibox/AeroAgent/sub && source .venv/bin/activate && python3 subtitle_generatorv3.py

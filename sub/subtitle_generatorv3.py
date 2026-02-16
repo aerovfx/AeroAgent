@@ -5,7 +5,11 @@ import warnings
 import threading
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tkinter import Tk, filedialog
+try:
+    from tkinter import Tk, filedialog
+    HAS_TK = True
+except ModuleNotFoundError:
+    HAS_TK = False
 from tqdm import tqdm
 import gc
 import time
@@ -30,10 +34,20 @@ def optimize_for_cpu():
     
     print(f"🔧 Tối ưu cho CPU: {multiprocessing.cpu_count()} cores/threads")
 
-# Hộp thoại chọn thư mục
-root = Tk()
-root.withdraw()
-folder_path = filedialog.askdirectory(title="Chọn thư mục chứa video")
+# Chọn thư mục: GUI (tkinter) hoặc dòng lệnh
+if HAS_TK:
+    root = Tk()
+    root.withdraw()
+    folder_path = filedialog.askdirectory(title="Chọn thư mục chứa video")
+else:
+    import sys
+    if len(sys.argv) > 1:
+        folder_path = sys.argv[1]
+    else:
+        folder_path = input("Nhập đường dẫn thư mục chứa video: ").strip()
+    if folder_path and not os.path.isdir(folder_path):
+        print(f"❌ Không tìm thấy thư mục: {folder_path}")
+        exit()
 
 if not folder_path:
     print("❌ Bạn chưa chọn thư mục nào.")
