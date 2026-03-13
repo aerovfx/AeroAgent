@@ -1,0 +1,4 @@
+# 12 -13 - Complete the home and about pages.ko KR
+
+---
+

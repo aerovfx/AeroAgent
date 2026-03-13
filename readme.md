@@ -242,4 +242,4 @@ This process ensures the app is functional, extensible, and aligned with modern 
 - [OCR Web API with FastAPI + Ollama + Docker](https://medium.com/@RikuAlice/%EF%B8%8Focr-web-api-with-fastapi-ollama-docker-extracting-text-from-images-using-ai-llama-3-2-visio-4f3a27b0849d)
 - [Advanced AI-OCR with FastAPI and OpenAI Integration](https://github.com/LiveWithCodeAnkit/AI-OCR)
 
-pip install fastapi uvicorn python-multipart python-docx transformers torch datasets evaluate pillow opencv-python-headless
+pip install fastapi uvicorn python-multipart python-docx transformers torch datasets evaluate pillow opencv-python-headless# Cyber

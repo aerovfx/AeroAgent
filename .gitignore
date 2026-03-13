@@ -1,5 +1,44 @@
 # ==========================
-# Python
+# Secret Tokens & Credentials
+# ==========================
+token.pickle
+credentials.json
+*.token
+*.key
+*.pem
+.env
+.env.*
+secrets/
+credentials/
+config_local.py
+auth.json
+
+# ==========================
+# AI/ML & Large Data
+# ==========================
+*.h5
+*.pkl
+*.npz
+*.pt
+*.pth
+*.onnx
+*.weights
+*.bin
+*.model
+*.ckpt
+*.joblib
+data/
+dataset/
+datasets/
+cbre_out/
+cbre_to_hf/
+*.csv
+*.jsonl
+# Keep common config JSONs but ignore large data JSONs if needed
+# *.json 
+
+# ==========================
+# Python & Virtual Environments
 # ==========================
 __pycache__/
 *.py[cod]
@@ -12,27 +51,19 @@ __pycache__/
 dist/
 build/
 .eggs/
-
-# ==========================
-# Virtual Environment
-# ==========================
-env/
-venv/
-ENV/
 .venv/
+venv/
+env/
+ENV/
 .env/
 
 # ==========================
-# IDE / Editor
+# IDE / Editor / OS
 # ==========================
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
-
-# ==========================
-# OS files
-# ==========================
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -43,28 +74,3 @@ desktop.ini
 *.log
 logs/
 *.out
-
-# ==========================
-# Data files (sensitive)
-# ==========================
-*.json
-*.jsonl
-*.csv
-*.db
-*.sqlite
-data/
-dataset/
-*.h5
-*.pkl
-*.npz
-
-# ==========================
-# Secrets / Environment
-# ==========================
-.env
-.env.*
-secrets/
-*.key
-*.pem
-credentials/
-config_local.py
